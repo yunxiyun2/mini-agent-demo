@@ -1,7 +1,9 @@
 package com.dyx;
 
+import com.dyx.dto.OpenAIMessage;
+import com.dyx.dto.OpenAIRequest;
+import com.dyx.dto.OpenAIResponse;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
@@ -15,7 +17,6 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Stream;
 
 public class MiniOpenAIClient {
@@ -26,30 +27,11 @@ public class MiniOpenAIClient {
             .connectTimeout(Duration.ofSeconds(30))
             .build();
 
-    public static class Req{
-        public String model;
-        public List<Map<String, String>> messages;
-        public boolean stream;
-        public Req(String model, List<Map<String, String>> messages) {
-            this.model = model;
-            this.messages = messages;
-        }
-    }
+    public OpenAIResponse chat(String baseUrl, String apiKey, OpenAIRequest openAIRequest) {
 
-    public static class Chunk{
-        public String id;
-        public List<Choice> choices;
-        public static class Choice{
-            public Map<String, Object> delta;
-            public String finish_reason;       }
-    }
-
-    public String chat(String baseUrl, String apiKey, String model,
-                       List<Map<String, String>> messages){
-        Req req = new Req(model, messages);
-        req.stream = false;
+        openAIRequest.setStream(false);
         try {
-            String body = objectMapper.writeValueAsString(req);
+            String body = objectMapper.writeValueAsString(openAIRequest);
             HttpRequest httpReq = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/chat/completions"))
                     .header("Authorization", "Bearer " + apiKey)
@@ -62,19 +44,18 @@ public class MiniOpenAIClient {
             if(resp.statusCode() >= 400){
                 throw new RuntimeException("HTTP " + resp.statusCode() + ": " + resp.body());
             }
-            return resp.body();
+
+            return objectMapper.readValue(resp.body(), OpenAIResponse.class);// 反序列化
 
         } catch (InterruptedException | IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public Stream<String> chatStream(String baseUrl, String apiKey, String model,
-                                     List<Map<String, String>> messages){
-        Req req = new Req(model, messages);
-        req.stream = true;
+    public Stream<OpenAIResponse> chatStream(String baseUrl, String apiKey, OpenAIRequest openAIRequest) {
+        openAIRequest.setStream(true);
         try {
-            String body = objectMapper.writeValueAsString(req);
+            String body = objectMapper.writeValueAsString(openAIRequest);
             HttpRequest httpReq = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/chat/completions"))
                     .header("Authorization", "Bearer " + apiKey)
@@ -106,34 +87,46 @@ public class MiniOpenAIClient {
             throw new RuntimeException(e);
         }
     }
-    private String extractDelta(String data){
+    private OpenAIResponse extractDelta(String data){
         try{
-            JsonNode root = objectMapper.readTree(data);
-            JsonNode delta = root.path("choices").path(0).path("delta");
-            // 先看 content，再看 reasoning_content
-            String content = delta.path("content").asText("");
-            if (!content.isEmpty()) return "[content]" + content;
-            String reasoning = delta.path("reasoning_content").asText("");
-            if (!reasoning.isEmpty()) return "[思考] " + reasoning;
-            return "";
+            return objectMapper.readValue(data, OpenAIResponse.class);
         } catch (JsonProcessingException e) {
-            return "";
+            return null;
         }
     }
 
     public static void main(String[] args){
         MiniOpenAIClient miniOpenAIClient = new MiniOpenAIClient();
-        List<Map<String, String>> messages = List.of(
-                Map.of("role", "system", "content", "你是助手"),
-                Map.of("role", "user", "content", "用一句话介绍杭州")
-        );
+        OpenAIRequest openAIRequest = new OpenAIRequest();
+        openAIRequest.setModel("glm-5.2");
+        openAIRequest.setTemperature(0.7);
+        openAIRequest.setMessages(List.of(
+                new OpenAIMessage("system","你是助手"),
+                new OpenAIMessage("user","用一句话介绍杭州")
+        ));
+
         String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
         //String baseUrl = "https://open.bigmodel.cn/api/paas/v4";
         String apiKey = System.getenv("ZHIPU_API_KEY");
-        System.out.println(miniOpenAIClient.chat(baseUrl, apiKey, "glm-5.2", messages));
 
-        miniOpenAIClient.chatStream(baseUrl, apiKey, "glm-5.2", messages)
-                .forEach(System.out::println);
+        OpenAIResponse chatResp = miniOpenAIClient.chat(baseUrl, apiKey, openAIRequest);
+        System.out.println("[Sync] " + chatResp.getFirstChoice().getMessage().getContent());
+        System.out.println("[USAGE] total=" + chatResp.getUsage().getTotalTokens()
+                + ", reasoning=" + chatResp.getUsage().getCompletionTokensDetails().getReasoningTokens());
+
+
+        miniOpenAIClient.chatStream(baseUrl, apiKey, openAIRequest)
+                .filter(r -> r!=null && r.getFirstChoice()!=null)
+                .map(r -> {
+                    OpenAIMessage delta = r.getFirstChoice().getDelta();
+                    String content = delta.getContent();
+                    if(content!=null && !content.isEmpty())return "[输出] " + content;
+                    String reasoning = delta.getReasoningContent();
+                    if(reasoning!=null && !reasoning.isEmpty())return "[思考] " + reasoning;
+                    return "";
+                })
+                .filter(s -> !s.isEmpty())
+                .forEach(s -> System.out.println(s));
 
     }
 
