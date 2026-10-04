@@ -1,8 +1,8 @@
-package com.dyx;
+package com.xin.historia;
 
-import com.dyx.dto.OpenAIMessage;
-import com.dyx.dto.OpenAIRequest;
-import com.dyx.dto.OpenAIResponse;
+import com.xin.historia.dto.OpenAIMessage;
+import com.xin.historia.dto.OpenAIRequest;
+import com.xin.historia.dto.OpenAIResponse;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 

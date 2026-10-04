@@ -1,4 +1,4 @@
-package com.dyx.dto;
+package com.xin.historia.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;

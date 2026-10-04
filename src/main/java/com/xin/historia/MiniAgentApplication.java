@@ -1,4 +1,4 @@
-package com.dyx;
+package com.xin.historia;
 
 public class MiniAgentApplication {
     // jdk17
